@@ -1,5 +1,5 @@
 /*
-Important: This code is only for the DIY PRO PCB Version 3.7 that has a push button mounted.
+Important: This code is only for the DIY PRO PCB Version 4.2 that has a push button mounted.
 
 This is the code for the AirGradient DIY PRO Air Quality Sensor with an ESP8266 Microcontroller with the SGP40 TVOC module from AirGradient.
 
@@ -46,11 +46,14 @@ CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
 
 #include <U8g2lib.h>
 
+#include "ESP8266WebServer.h"
+
 AirGradient ag = AirGradient();
 SensirionI2CSgp41 sgp41;
 VOCGasIndexAlgorithm voc_algorithm;
 NOxGasIndexAlgorithm nox_algorithm;
 SHTSensor sht;
+
 
 // time in seconds needed for NOx conditioning
 uint16_t conditioning_s = 10;
@@ -71,6 +74,9 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 //set to the endpoint you would like to use
 String APIROOT = "http://hw.airgradient.com/";
 
+// Server port
+int SERVER_PORT = 80;
+
 // set to true to switch from Celcius to Fahrenheit
 boolean inF = false;
 
@@ -84,6 +90,9 @@ boolean displayTop = true;
 boolean connectWIFI=true;
 
 // CONFIGURATION END
+
+// Initialize HTTP server with given port
+ESP8266WebServer server(SERVER_PORT);
 
 
 unsigned long currentMillis = 0;
@@ -160,6 +169,15 @@ void setup() {
   ag.CO2_Init();
   ag.PMS_Init();
   ag.TMP_RH_Init(0x44);
+
+
+  // Setup HTTP server
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP()); 
+
+  server.on("/", serveHttp);    
+  server.begin();                  
+  Serial.println("Server listening");
 }
 
 void loop() {
@@ -169,7 +187,11 @@ void loop() {
   updateCo2();
   updatePm();
   updateTempHum();
-  sendToServer();
+  // Sorry guys, strictly local...
+  //sendToServer();
+
+  // Serve HTTP request
+  server.handleClient();
 }
 
 void inConf(){
@@ -431,3 +453,39 @@ int PM_TO_AQI_US(int pm02) {
   else if (pm02 <= 500.4) return ((500 - 400) / (500.4 - 350.4) * (pm02 - 350.4) + 400);
   else return 500;
 };
+
+void serveHttp() {
+  String data = "{"
+  +   q("sensor") + ":"
+  +   "{" 
+  +     q("co2") + ":" + String(Co2) + ","
+  +     q("pm01") + ":" + String(pm01) + ","
+  +     q("pm02") + ":" + String(pm25) + ","
+  +     q("pm10") + ":" + String(pm10) + ","
+  +     q("pm03PCount") + ":" + String(pm03PCount) + ","
+  +     q("tvoc_index") + ":" + String(TVOC) + ","
+  +     q("nox_index") + ":" + String(NOX) + ","
+  +     q("temp_c") + ":" + String(temp) + ","
+  +     q("humidity") + ":" + String(hum)
+  +   "},"
+  +   q("system") + ":"
+  +   "{" 
+  +     q("wifi") + ":"
+  +     "{" 
+  +       q("rssi") + ":" + String(WiFi.RSSI()) + ","
+  +       q("ssid") + ":" + q(String(WiFi.SSID())) + ","
+  +       q("hw_addr") + ":" + q(String(WiFi.macAddress())) + ","
+  +       q("ip") + ":" + q(WiFi.localIP().toString())
+  +     "},"
+  +     q("millis") + ":" + String(millis()) + ","
+  +     q("serial") + ":" + q(String(ESP.getChipId(), HEX))
+  +   "}"
+  + "}";
+
+  server.send(200, "application/json", data);
+}
+
+// Quotes a given token
+String q(String token) {
+  return "\"" + token + "\"";
+}
